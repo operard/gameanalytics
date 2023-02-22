@@ -1,0 +1,15 @@
+###### Requirements without Version Specifiers ######
+requests
+pyyaml
+pandas
+openpyxl
+xlrd
+oracledb
+oci
+twint
+nltk
+numpy
+sklearn
+vader
+vaderSentiment
+###### Requirements with Version Specifiers ######

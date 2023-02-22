@@ -1,0 +1,216 @@
+import os
+import sys
+import pandas as pd
+import numpy as np
+from pprint import pprint
+import requests
+import time
+from threading import Thread
+import cx_Oracle
+import yaml
+import csv
+from datetime import datetime
+import codecs
+import twint
+import json
+import re
+import unicodedata
+import re
+import sys
+import argparse
+from sklearn.feature_extraction import text
+from sklearn.feature_extraction.text import CountVectorizer
+from nltk import *
+from nltk.corpus import stopwords
+from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+import nltk
+from nltk.collocations import BigramCollocationFinder, BigramAssocMeasures
+
+version = "1.0.1"
+
+verbose = False
+debug = False
+data_path = '/home/opc/data_twitter/users_month'
+from_path = '/home/opc/data_twitter/fromusers_month'
+data_csv_path = '/home/opc/data_twitter_csv/users_month'
+from_csv_path = '/home/opc/data_twitter_csv/fromusers_month'
+
+analyser = SentimentIntensityAnalyzer()
+
+def process_yaml():
+	with open("../config.yaml") as file:
+		return yaml.safe_load(file)
+
+
+def sentiment_scores(analyser, sentence):
+    snt = analyser.polarity_scores(sentence)
+    return snt
+
+def to_timestamp(timestamp):
+	dt_object = datetime.fromtimestamp(timestamp/1000)
+	return dt_object
+
+# auxiliary function to get hashtags from a string. (removes duplicates using set then converts to list)
+def extract_hash_tags(s):
+	return list(set(part[1:] for part in s.split() if part.startswith('#')))
+
+def analyze_sentiment(text):
+	score = sentiment_scores(analyser, text)
+	score_coumpound = score['compound']
+	sentiment = score_coumpound
+	sentiment_label = 'Neutral'
+	if score_coumpound >= 0.05:
+		sentiment_label = 'Positive'
+	elif score_coumpound <= -0.05:
+		sentiment_label = 'Negative'    
+	else:
+		sentiment_label = 'Neutral'
+	return [sentiment_label, sentiment, score['pos'], score['neu'], score['neg']]
+
+def analyze_ReplyTo (df):
+    # [{'screen_name': 'CinicoKuzco', 'name': '𝕱𝖗𝖆𝖓𝖈𝖎𝖘𝖈𝖔 🇳🇮', 'id': '300258285'}]
+	'''
+	['id', 'conversation_id', 'created_at', 'date', 'timezone', 'place',
+       'tweet', 'language', 'hashtags', 'cashtags', 'user_id', 'user_id_str',
+       'username', 'name', 'day', 'hour', 'link', 'urls', 'photos', 'video',
+       'thumbnail', 'retweet', 'nlikes', 'nreplies', 'nretweets', 'quote_url',
+       'search', 'near', 'geo', 'source', 'user_rt_id', 'user_rt',
+       'retweet_id', 'reply_to', 'retweet_date', 'translate', 'trans_src',
+       'trans_dest']
+      '''
+    
+
+def extendDataframe(df, search_filter):
+	if len(df.index) > 0:
+		df['search_filter'] = '{}'.format(search_filter)
+		df['sentiment_label'] = df['tweet'].apply(lambda x: analyze_sentiment(x)[0] )
+		df['sentiment'] = df['tweet'].apply(lambda x: analyze_sentiment(x)[1] )
+		df['how_positive'] = df['tweet'].apply(lambda x: analyze_sentiment(x)[2] )
+		df['how_neutral'] = df['tweet'].apply(lambda x: analyze_sentiment(x)[3] )
+		df['how_negative'] = df['tweet'].apply(lambda x: analyze_sentiment(x)[4] )
+		df['hashtags_modif'] = df['tweet'].apply(lambda x: str(extract_hash_tags(x)) )
+		df['created_at'] = df['created_at'].apply(lambda x: to_timestamp(x) )
+	# 
+	#out_df= pd.DataFrame()
+	#out_df = pd.concat([out_df,df])
+	#return out_df
+	#df.to_csv(tweets_save, index=False, encoding='utf-8', quoting=csv.QUOTE_NONNUMERIC)
+	return df
+
+
+def scrape_by_user(us, since, until):
+	print ("Fetching Tweets for {}".format(us))
+	c = twint.Config()
+	# choose username (optional)
+	c.Username=us
+    #
+	#c.Since = '2018-01-01'
+	c.Since = '{}'.format(since)
+	c.Until = '{}'.format(until)
+	c.Pandas = True
+	# we want to hide the output, there will be a lot of tweets
+	c.Hide_output = True
+	c.Store_json = True
+    # Save
+	fname = str.format("{}_{}_{}.json", us,since,until)
+	tweets_save = os.path.join(data_path, fname)
+	c.Output = tweets_save
+    # Execute Command
+	twint.run.Search(c)
+	tweets_df = twint.storage.panda.Tweets_df
+	print('[scrape_by_user] {} tweets | {} | user'.format(len(tweets_df.index), us))
+	if len(tweets_df.index) > 0:
+		#df_csv= pd.DataFrame()
+		df_csv = extendDataframe(tweets_df, '{}'.format(us))
+		df_main = df_csv[(df_csv['conversation_id'] == df_csv['id'])]
+		df_replies = df_csv[(df_csv['conversation_id'] != df_csv['id'])]
+		print('[scrape_by_user] {} main tweets | {} replies tweets | {} | user'.format(len(df_main.index),len(df_replies.index), us))
+		# Save
+		fname = str.format("{}_{}_{}.csv", us,since,until)
+		tweets_save = os.path.join(data_csv_path, fname)
+		df_main.to_csv(tweets_save, index=False, encoding='utf-8', quoting=csv.QUOTE_NONNUMERIC)
+		fname = str.format("{}_{}_{}_replies.csv", us,since,until)
+		tweets_save = os.path.join(data_csv_path, fname)
+		df_replies.to_csv(tweets_save, index=False, encoding='utf-8', quoting=csv.QUOTE_NONNUMERIC)
+
+
+def scrape_from_user(us, since, until):
+	print ("Fetching Tweets from {}".format(us))
+	c = twint.Config()
+	# choose username (optional)
+	#c.Username=us
+	c.Search = 'from:@{}'.format(us)
+    #
+	#c.Since = '2018-01-01'
+	c.Since = '{}'.format(since)
+	c.Until = '{}'.format(until)
+	c.Pandas = True
+	# we want to hide the output, there will be a lot of tweets
+	c.Hide_output = True
+	c.Store_json = True
+    # Save
+	fname = str.format("{}_{}_{}.json", us,since,until)
+	tweets_save = os.path.join(from_path, fname)
+	c.Output = tweets_save
+    # Execute Command
+	twint.run.Search(c)
+	tweets_df = twint.storage.panda.Tweets_df
+	print('[scrape_from_user] {} tweets | {} | user'.format(len(tweets_df.index), us))
+	if len(tweets_df.index) > 0:
+		df_csv = extendDataframe(tweets_df, '@{}'.format(us))
+		df_main = df_csv[(df_csv['conversation_id'] == df_csv['id'])]
+		df_replies = df_csv[(df_csv['conversation_id'] != df_csv['id'])]
+		print('[scrape_from_user] {} main tweets | {} replies tweets | {} | user'.format(len(df_main.index),len(df_replies.index), us))
+		# Save
+		fname = str.format("{}_{}_{}.csv", us,since,until)
+		tweets_save = os.path.join(from_csv_path, fname)
+		df_main.to_csv(tweets_save, index=False, encoding='utf-8', quoting=csv.QUOTE_NONNUMERIC)
+		fname = str.format("{}_{}_{}_replies.csv", us,since,until)
+		tweets_save = os.path.join(data_csv_path, fname)
+		df_replies.to_csv(tweets_save, index=False, encoding='utf-8', quoting=csv.QUOTE_NONNUMERIC)
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    #parser.add_argument('-g', '--group', help="Specific keyword group to process", required=False)
+    #parser.add_argument('-t', '--time', help="Number of days to retrieve relative to the current date", required=False)
+    #parser.add_argument('-k', '--keyword', help='Keyword to process', required=False)
+    parser.add_argument('-u', '--user', help='Twitter User Account', required=True)
+    parser.add_argument('-S', '--Since', help='Since Date', required=True)
+    parser.add_argument('-U', '--Until', help='Until Date', required=True)
+    args = parser.parse_args()
+
+    # Check Directory exists
+    if not os.path.exists(data_path):
+        os.mkdir(data_path)
+    # Check Directory exists
+    if not os.path.exists(data_csv_path):
+        os.mkdir(data_csv_path)
+    if not os.path.exists(from_path):
+        os.mkdir(from_path)
+    # Check Directory exists
+    if not os.path.exists(from_csv_path):
+        os.mkdir(from_csv_path)
+
+    init_time2 = datetime.now()
+    # read yaml config
+    # data = process_yaml()
+    # Execute Method
+    scrape_by_user(args.user, args.Since, args.Until)
+    scrape_from_user(args.user, args.Since, args.Until)
+    print("Done!")
+    #
+    end_time2 = datetime.now()
+    dif_time2=end_time2-init_time2
+    #
+    temp=dif_time2.seconds
+    hours = temp//3600
+    temp = temp - 3600*hours
+    minutes = temp//60
+    seconds = temp - 60*minutes
+    print('Execution Time to extract user twitter : %d hour:%d min:%d sec' %(hours,minutes,seconds))
+
+
+if __name__ == "__main__":
+    main()
+
