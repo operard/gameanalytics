@@ -16,59 +16,45 @@ sudo dnf install git -y
 
 ```
 
-Install python3.10
+Install python3.9
 
-https://www.centlinux.com/2022/06/how-to-install-python-310-on-rocky-linux.html
+```code
+sudo dnf module install python39
+sudo dnf install python3-requests
+```
 
 Create an environment in order to isolate your GameAnalytics agents.
 
 ```code
+sudo pip3.9 install virtualenv
+which python3.9
+virtualenv -p /usr/local/bin/python3.9 gameanalytics
+ 
+```
 
-sudo pip3.10 install virtualenv
-which python3.10
-virtualenv -p /usr/bin/python3.10 gameanalytics
+Activate GameAnalytics environment.
+
+```code
 source gameanalytics/bin/activate
  
 ```
 
+## Install GameAnalytics Agent Software.
+
+```code
+cd /opt
+git clone https://github.com/operard/gameanalytics
+ 
+```
+
+
 ## Install all python3 libraries used by GameAnalytics Agent.
 
 ```code
-
-pip install -r gameanalytics/requirements.txt
-
+pip3.9 install -r /opt/gameanalytics/requirements.txt
 ```
-
 
 ## Other links
 
 
-
-
-
-
-# Connect to the database
-!pip install oracledb
-
-
-def initialize_database_connection_and_table():
-    # Initializes the connection to the database (we will use this to store the tracking information)
-    import oracledb
-    connection = oracledb.connect(
-        user='admin',
-        password='_Oracle12345',
-        dsn='pl_high',
-        config_dir='/home/datascience/wallet',
-        wallet_location='/home/datascience/wallet',
-        wallet_password='_Oracle12345')
-    cur = connection.cursor()
-    try:
-        cur.execute("create table tracking(framenumber number, object varchar2(10), shirt_number number, position_x number, position_y number)")
-    except Exception:
-        print("Could not create the tracking table, moving on...")
-    try:
-        cur.execute("truncate table tracking")
-    except Exception:
-        print("Could not empty the tracking table")
-    return connection, cur
 
